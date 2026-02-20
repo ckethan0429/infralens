@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
 
 from fpdf import FPDF
@@ -27,6 +28,47 @@ def _write_multiline(pdf: FPDF, text: str, line_height: int = 6) -> None:
         safe_text = text.encode("latin-1", "replace").decode("latin-1")
     pdf.set_x(pdf.l_margin)
     pdf.multi_cell(pdf.epw, line_height, safe_text)
+
+
+def _markdown_to_plain_text(text: str) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    plain_lines: list[str] = []
+    in_code_fence = False
+
+    for raw_line in normalized.split("\n"):
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence:
+            plain_lines.append(line)
+            continue
+
+        if re.fullmatch(r"[-*_]{3,}", stripped):
+            continue
+
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+        line = re.sub(r"^\s*>\s?", "", line)
+        line = re.sub(r"^\s*[-*+]\s+", "- ", line)
+        line = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", line)
+        line = re.sub(r"`([^`]*)`", r"\1", line)
+        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+        line = re.sub(r"__(.*?)__", r"\1", line)
+
+        plain_lines.append(line)
+
+    # Collapse excessive blank lines for cleaner PDF layout.
+    collapsed: list[str] = []
+    for line in plain_lines:
+        if line.strip():
+            collapsed.append(line)
+            continue
+        if collapsed and collapsed[-1] != "":
+            collapsed.append("")
+
+    return "\n".join(collapsed).strip()
 
 
 def _enable_unicode_font(pdf: FPDF) -> tuple[bool, str]:
@@ -103,7 +145,7 @@ def build_pdf_report(
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
     pdf.cell(0, 8, lbl["analysis"], ln=True)
     pdf.set_font(font_family, "", 10)
-    _write_multiline(pdf, analysis_text)
+    _write_multiline(pdf, _markdown_to_plain_text(analysis_text))
 
     pdf.ln(2)
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
@@ -120,6 +162,6 @@ def build_pdf_report(
         )
     _write_multiline(pdf, expected_line)
     pdf.ln(2)
-    _write_multiline(pdf, recommendation_text)
+    _write_multiline(pdf, _markdown_to_plain_text(recommendation_text))
 
     return bytes(pdf.output(dest="S"))

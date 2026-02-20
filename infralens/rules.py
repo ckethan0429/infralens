@@ -87,6 +87,10 @@ def detect_bottlenecks(
                         "Inference workloads are running on underused full GPUs; MIG partitioning can improve density."
                     ),
                     code="mig_opportunity",
+                    data={
+                        "gpu_util_threshold": mig_util_th,
+                        "vram_used_threshold_gb": mig_vram_th,
+                    },
                 )
             )
 

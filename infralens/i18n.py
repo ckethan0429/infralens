@@ -51,11 +51,30 @@ def localize_finding_message(finding: Finding, language: str) -> str:
         return f"{d.get('count')} GPU(s) show low utilization (<{d.get('threshold')}%), indicating potential under-allocation."
 
     if finding.code == "mig_opportunity":
+        util_th = d.get("gpu_util_threshold")
+        vram_th = d.get("vram_used_threshold_gb")
+        if util_th is None:
+            util_th = 65
+        if vram_th is None:
+            vram_th = 90
+        vram_text = f"{vram_th:g}"
         if l == "ko":
-            return "추론 워크로드가 저활용 전체 GPU에서 실행 중입니다. MIG 분할로 밀도를 높일 수 있습니다."
+            return (
+                "추론 워크로드가 저활용 전체 GPU에서 실행 중입니다 "
+                f"(기준: GPU 활용률 <{util_th}%, VRAM 사용량 <{vram_text}GB). "
+                "MIG 분할로 밀도를 높일 수 있습니다."
+            )
         if l == "zh":
-            return "推理负载正在低利用率整卡上运行，可通过 MIG 切分提升密度。"
-        return "Inference workloads are running on underused full GPUs; MIG partitioning can improve density."
+            return (
+                "推理负载正在低利用率整卡上运行"
+                f"（阈值：GPU 利用率 <{util_th}% 且显存使用量 <{vram_text}GB）。"
+                "可通过 MIG 切分提升密度。"
+            )
+        return (
+            "Inference workloads are running on underused full GPUs "
+            f"(thresholds: GPU utilization <{util_th}% and VRAM used <{vram_text}GB); "
+            "MIG partitioning can improve density."
+        )
 
     if finding.code == "nvlink_spread_training":
         if l == "ko":
@@ -66,10 +85,10 @@ def localize_finding_message(finding: Finding, language: str) -> str:
 
     if finding.code == "healthy":
         if l == "ko":
-            return "제공된 텔레메트리 기준으로 주요 병목은 감지되지 않았습니다."
+            return "제공된 텔레메트리 기준으로 주요 병목/비효율은 감지되지 않았습니다."
         if l == "zh":
-            return "基于当前遥测数据，未检测到明显瓶颈。"
-        return "No major bottlenecks detected from the provided sample telemetry."
+            return "基于当前遥测数据，未检测到明显瓶颈/低效。"
+        return "No major bottlenecks/inefficiencies detected from the provided sample telemetry."
 
     return finding.message
 
