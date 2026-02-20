@@ -1,0 +1,5 @@
+index,utilization.gpu,memory.used,memory.total,numa_node,cpu_socket,nvlink_group
+0,88 %,70200 MiB,81920 MiB,0,0,A
+1,81 %,64400 MiB,81920 MiB,0,0,A
+2,76 %,59000 MiB,81920 MiB,1,1,B
+3,39 %,11800 MiB,81920 MiB,1,1,B

@@ -1,0 +1,5 @@
+gpu_id,numa_node,cpu_socket,nvlink_group,cpu_affinity
+0,0,0,A,"0-23,48-71"
+1,0,0,A,"0-23,48-71"
+2,1,1,B,"24-47,72-95"
+3,1,1,B,"24-47,72-95"

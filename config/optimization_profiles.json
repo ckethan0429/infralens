@@ -1,0 +1,36 @@
+{
+  "score_weights": {
+    "default": {"gpu": 0.6, "numa": 0.2, "network": 0.2},
+    "training": {"gpu": 0.65, "numa": 0.25, "network": 0.1},
+    "inference": {"gpu": 0.55, "numa": 0.15, "network": 0.3}
+  },
+  "rule_thresholds": {
+    "default": {
+      "low_util_threshold": 45,
+      "low_util_fraction": 0.25,
+      "mig_underused_util_threshold": 65,
+      "mig_underused_vram_threshold_gb": 90,
+      "requires_training_gpus": 4,
+      "expected_util_score_factor": 0.77,
+      "expected_util_gain": 30
+    },
+    "training": {
+      "low_util_threshold": 50,
+      "low_util_fraction": 0.25,
+      "mig_underused_util_threshold": 60,
+      "mig_underused_vram_threshold_gb": 80,
+      "requires_training_gpus": 4,
+      "expected_util_score_factor": 0.78,
+      "expected_util_gain": 28
+    },
+    "inference": {
+      "low_util_threshold": 40,
+      "low_util_fraction": 0.33,
+      "mig_underused_util_threshold": 70,
+      "mig_underused_vram_threshold_gb": 60,
+      "requires_training_gpus": 4,
+      "expected_util_score_factor": 0.75,
+      "expected_util_gain": 32
+    }
+  }
+}

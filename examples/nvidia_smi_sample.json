@@ -1,0 +1,40 @@
+{
+  "gpus": [
+    {
+      "index": 0,
+      "utilization.gpu": "88 %",
+      "memory.used": "70200 MiB",
+      "memory.total": "81920 MiB",
+      "numa_node": 0,
+      "cpu_socket": 0,
+      "nvlink_group": "A"
+    },
+    {
+      "index": 1,
+      "utilization.gpu": "81 %",
+      "memory.used": "64400 MiB",
+      "memory.total": "81920 MiB",
+      "numa_node": 0,
+      "cpu_socket": 0,
+      "nvlink_group": "A"
+    },
+    {
+      "index": 2,
+      "utilization.gpu": "76 %",
+      "memory.used": "59000 MiB",
+      "memory.total": "81920 MiB",
+      "numa_node": 1,
+      "cpu_socket": 1,
+      "nvlink_group": "B"
+    },
+    {
+      "index": 3,
+      "utilization.gpu": "39 %",
+      "memory.used": "11800 MiB",
+      "memory.total": "81920 MiB",
+      "numa_node": 1,
+      "cpu_socket": 1,
+      "nvlink_group": "B"
+    }
+  ]
+}

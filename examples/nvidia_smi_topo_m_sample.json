@@ -1,0 +1,8 @@
+{
+  "gpus": [
+    {"gpu_id": 0, "numa_node": 0, "cpu_socket": 0, "nvlink_group": "A", "cpu_affinity": "0-23,48-71"},
+    {"gpu_id": 1, "numa_node": 0, "cpu_socket": 0, "nvlink_group": "A", "cpu_affinity": "0-23,48-71"},
+    {"gpu_id": 2, "numa_node": 1, "cpu_socket": 1, "nvlink_group": "B", "cpu_affinity": "24-47,72-95"},
+    {"gpu_id": 3, "numa_node": 1, "cpu_socket": 1, "nvlink_group": "B", "cpu_affinity": "24-47,72-95"}
+  ]
+}

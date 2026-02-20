@@ -1,0 +1,5 @@
+        GPU0    GPU1    GPU2    GPU3    CPU Affinity    NUMA Affinity
+GPU0    X       NV12    SYS     SYS     0-23,48-71      0
+GPU1    NV12    X       SYS     SYS     0-23,48-71      0
+GPU2    SYS     SYS     X       NV12    24-47,72-95     1
+GPU3    SYS     SYS     NV12    X       24-47,72-95     1
