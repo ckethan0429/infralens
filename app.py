@@ -3,8 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from infralens.commands import build_execution_templates
-from infralens.data import Workload, default_workloads, sample_scenarios
+from infralens.commands import ExecutionConfig, build_execution_templates
+from infralens.data import Workload, default_workloads, sample_scenarios, workloads_for_scenario
 from infralens.i18n import localize_findings, localize_recommendation, localize_severity
 from infralens.llm import (
     generate_bottleneck_analysis,
@@ -250,25 +250,67 @@ def render_llm_loading(language_text: str, detail_text: str) -> str:
 
 
 st.set_page_config(page_title="InfraLens MVP", layout="wide")
+st.markdown(
+    """
+<style>
+[data-testid="stSidebar"] {
+  width: 30vw;
+  min-width: 30vw;
+  max-width: 30vw;
+}
+[data-testid="stSidebar"] > div:first-child { width: 30vw; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 lang_label_map = {"한국어": "ko", "English": "en", "中文": "zh"}
-lang_ui = st.selectbox("Language / 언어 / 语言", list(lang_label_map.keys()), index=0)
+with st.sidebar:
+    lang_ui = st.selectbox("Language / 언어 / 语言", list(lang_label_map.keys()), index=0)
 lang = lang_label_map[lang_ui]
 t = I18N[lang]
 
 st.title(t["title"])
 st.caption(t["caption"])
-with st.expander(t["cmd_title"], expanded=False):
-    st.caption(t["cmd_gpu"])
-    st.code(
-        "nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits > nvidia_smi.csv",
-        language="bash",
-    )
-    st.caption(t["cmd_topo"])
-    st.code("nvidia-smi topo -m > nvidia_smi_topo_m.txt", language="bash")
-    st.caption(t["cmd_numa"])
-    st.code("numactl --hardware > numactl_hardware.txt", language="bash")
 
-with st.expander(t["llm_title"], expanded=False):
+scenarios = sample_scenarios()
+selected_name = ""
+scenario = None
+
+with st.sidebar:
+    data_source = st.radio(t["source"], [t["sample"], t["upload"]], horizontal=True)
+    if data_source == t["sample"]:
+        selected_name = st.selectbox(t["scenario"], list(scenarios.keys()))
+        scenario = scenarios[selected_name]
+    else:
+        upload = st.file_uploader(t["upload_label"], type=["csv"])
+        topo_upload = st.file_uploader(t["upload_topo_label"], type=["txt"], key="topo_upload")
+        numa_upload = st.file_uploader(t["upload_numa_label"], type=["txt"], key="numa_upload")
+        if upload is not None:
+            try:
+                topo_text = topo_upload.getvalue().decode("utf-8", errors="ignore") if topo_upload else None
+                numa_text = numa_upload.getvalue().decode("utf-8", errors="ignore") if numa_upload else None
+                scenario = parse_uploaded_telemetry(
+                    upload.name,
+                    upload.getvalue(),
+                    topo_text=topo_text,
+                    numactl_text=numa_text,
+                )
+                selected_name = scenario["name"]
+                st.success(t["upload_ok"].format(n=len(scenario["gpus"]), name=upload.name))
+                if topo_upload is not None:
+                    st.caption(
+                        t["upload_topo_ok"].format(
+                            topo=topo_upload.name,
+                            numa=numa_upload.name if numa_upload is not None else "N/A",
+                        )
+                    )
+            except Exception as exc:
+                st.error(t["upload_fail"].format(err=exc))
+        else:
+            st.info(t["upload_info"])
+
+    st.subheader(t["llm_title"])
     st.caption(t["llm_help"])
     llm_enabled = st.toggle(t["llm_enable"], value=False)
     llm_provider_ui = st.selectbox(t["llm_provider"], ["OpenAI", "Claude", "Google"], index=0, disabled=not llm_enabled)
@@ -293,47 +335,57 @@ with st.expander(t["llm_title"], expanded=False):
         disabled=not llm_enabled,
     )
 
-scenarios = sample_scenarios()
+    st.subheader("Execution Settings")
+    exec_env_ui = st.selectbox("Environment", ["Bare Metal", "Docker"], index=0)
+    exec_entry = st.text_input("Entry Command", value="python train.py")
+    exec_workdir = st.text_input("Workdir (Optional)", value="")
+    exec_image = st.text_input("Docker Image", value="your-image:latest", disabled=exec_env_ui != "Docker")
+    exec_prefix = st.text_input("Container Name Prefix", value="infralens-job")
+    exec_args = st.text_input("Extra Args", value="")
+    exec_envvars_raw = st.text_area("Env Vars (KEY=VALUE per line)", value="", height=90)
+    exec_cpumode_ui = st.selectbox("CPU Set Mode", ["Auto", "Manual"], index=0)
+    exec_cpumanual = st.text_input("Manual CPU Set", value="", disabled=exec_cpumode_ui != "Manual")
+    exec_gpustyle_ui = st.selectbox("GPU Visibility Style", ["CUDA_VISIBLE_DEVICES", "--gpus device"], index=0)
 
-data_source = st.radio(t["source"], [t["sample"], t["upload"]], horizontal=True)
 
-selected_name = ""
-scenario = None
+def _parse_env_vars(raw: str) -> tuple[dict[str, str], list[int]]:
+    out: dict[str, str] = {}
+    invalid_lines: list[int] = []
+    for idx, line in enumerate(raw.splitlines(), 1):
+        token = line.strip()
+        if not token:
+            continue
+        if "=" not in token:
+            invalid_lines.append(idx)
+            continue
+        k, v = token.split("=", 1)
+        key = k.strip()
+        if key:
+            out[key] = v.strip()
+        else:
+            invalid_lines.append(idx)
+    return out, invalid_lines
 
-if data_source == t["sample"]:
-    selected_name = st.selectbox(t["scenario"], list(scenarios.keys()))
-    scenario = scenarios[selected_name]
-else:
-    upload = st.file_uploader(t["upload_label"], type=["csv"])
-    topo_upload = st.file_uploader(t["upload_topo_label"], type=["txt"], key="topo_upload")
-    numa_upload = st.file_uploader(t["upload_numa_label"], type=["txt"], key="numa_upload")
-    if upload is not None:
-        try:
-            topo_text = topo_upload.getvalue().decode("utf-8", errors="ignore") if topo_upload else None
-            numa_text = numa_upload.getvalue().decode("utf-8", errors="ignore") if numa_upload else None
-            scenario = parse_uploaded_telemetry(
-                upload.name,
-                upload.getvalue(),
-                topo_text=topo_text,
-                numactl_text=numa_text,
-            )
-            selected_name = scenario["name"]
-            st.success(t["upload_ok"].format(n=len(scenario["gpus"]), name=upload.name))
-            if topo_upload is not None:
-                st.caption(
-                    t["upload_topo_ok"].format(
-                        topo=topo_upload.name,
-                        numa=numa_upload.name if numa_upload is not None else "N/A",
-                    )
-                )
-        except Exception as exc:
-            st.error(t["upload_fail"].format(err=exc))
-    else:
-        st.info(t["upload_info"])
+
+with st.expander(t["cmd_title"], expanded=False):
+    st.caption(t["cmd_gpu"])
+    st.code(
+        "nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits > nvidia_smi.csv",
+        language="bash",
+    )
+    st.caption(t["cmd_topo"])
+    st.code("nvidia-smi topo -m > nvidia_smi_topo_m.txt", language="bash")
+    st.caption(t["cmd_numa"])
+    st.code("numactl --hardware > numactl_hardware.txt", language="bash")
 
 st.subheader(t["workload"])
 if "workloads" not in st.session_state:
     st.session_state.workloads = [w.__dict__.copy() for w in default_workloads()]
+if data_source == t["sample"]:
+    prev_name = st.session_state.get("selected_scenario_name")
+    if selected_name and prev_name != selected_name:
+        st.session_state.workloads = [w.__dict__.copy() for w in workloads_for_scenario(selected_name)]
+        st.session_state.selected_scenario_name = selected_name
 
 workloads_df = pd.DataFrame(st.session_state.workloads)
 edited_df = st.data_editor(
@@ -341,16 +393,35 @@ edited_df = st.data_editor(
     num_rows="dynamic",
     use_container_width=True,
     column_config={
+        "name": st.column_config.TextColumn("name"),
         "kind": st.column_config.SelectboxColumn("kind", options=["training", "inference"]),
-        "gpu_demand": st.column_config.NumberColumn("gpu_demand", min_value=1, max_value=8, step=1),
+        "gpu_demand": st.column_config.NumberColumn(
+            "gpu_demand",
+            min_value=1,
+            max_value=max(1, len(scenario["gpus"])) if scenario else 8,
+            step=1,
+        ),
         "vram_gb": st.column_config.NumberColumn("vram_gb", min_value=1, max_value=160, step=1),
     },
 )
-
 st.session_state.workloads = edited_df.to_dict("records")
 workloads = [Workload(**w) for w in st.session_state.workloads]
 
-if st.button(t["analyze"], type="primary", disabled=scenario is None):
+parsed_env_vars, invalid_env_lines = _parse_env_vars(exec_envvars_raw)
+exec_validation_errors: list[str] = []
+if not exec_entry.strip():
+    exec_validation_errors.append("Entry command is required.")
+if exec_env_ui == "Docker" and not exec_image.strip():
+    exec_validation_errors.append("Docker image is required in Docker mode.")
+if exec_cpumode_ui == "Manual" and not exec_cpumanual.strip():
+    exec_validation_errors.append("Manual CPU set is required in Manual mode.")
+if invalid_env_lines:
+    exec_validation_errors.append(f"Invalid env var line(s): {','.join(str(i) for i in invalid_env_lines)}")
+if exec_validation_errors:
+    st.warning("Execution settings check: " + " | ".join(exec_validation_errors))
+
+analyze_clicked = st.button(t["analyze"], type="primary", disabled=(scenario is None or bool(exec_validation_errors)))
+if analyze_clicked:
     profile = infer_workload_profile(workloads)
     score = calculate_efficiency_score(scenario, profile=profile)
     findings_raw = detect_bottlenecks(scenario, workloads, profile=profile)
@@ -384,17 +455,45 @@ if st.button(t["analyze"], type="primary", disabled=scenario is None):
     )
     llm_loading_placeholder.empty()
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric(t["score"], f"{score.score}")
-    col2.metric(t["grade"], score.grade)
-    col3.metric(t["gpu_component"], f"{score.gpu_score:.2f}")
-    col4.metric(t["numa_component"], f"{score.numa_score:.2f}")
+    st.session_state.analysis_payload = {
+        "scenario_name": selected_name,
+        "scenario": scenario,
+        "workloads": workloads,
+        "score": score,
+        "findings": findings,
+        "analysis_text": analysis_text,
+        "analysis_source": analysis_source,
+        "recommendation": recommendation,
+        "recommendation_raw": recommendation_raw,
+        "rec_text": rec_text,
+        "rec_source": rec_source,
+    }
+
+payload = st.session_state.get("analysis_payload")
+if payload:
+    score = payload["score"]
+    findings = payload["findings"]
+    analysis_text = payload["analysis_text"]
+    analysis_source = payload["analysis_source"]
+    recommendation = payload["recommendation"]
+    recommendation_raw = payload["recommendation_raw"]
+    rec_text = payload["rec_text"]
+    rec_source = payload["rec_source"]
+    analyzed_scenario = payload["scenario"]
+    analyzed_workloads = payload["workloads"]
+    analyzed_scenario_name = payload["scenario_name"]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(t["score"], f"{score.score}")
+    c2.metric(t["grade"], score.grade)
+    c3.metric(t["gpu_component"], f"{score.gpu_score:.2f}")
+    c4.metric(t["numa_component"], f"{score.numa_score:.2f}")
     profile_label_key = f"profile_{score.profile}"
     if profile_label_key in t:
-        st.caption(f"{t['profile']}: {t[profile_label_key]}")
+        st.caption(f'{t["profile"]}: {t[profile_label_key]}')
 
     st.subheader(t["telemetry"])
-    st.dataframe(pd.DataFrame(scenario["gpus"]), use_container_width=True)
+    st.dataframe(pd.DataFrame(analyzed_scenario["gpus"]), use_container_width=True)
 
     st.subheader(t["findings"])
     for f in findings:
@@ -408,20 +507,6 @@ if st.button(t["analyze"], type="primary", disabled=scenario is None):
     st.subheader(t["placement"])
     for idx, item in enumerate(recommendation.items, 1):
         st.write(f"{idx}. **{item.workload}** - {item.action}")
-
-    cmd_templates = build_execution_templates(scenario, workloads, recommendation_raw)
-    if cmd_templates:
-        st.subheader(t["exec_title"])
-        st.caption(t["exec_desc"])
-        for tpl in cmd_templates:
-            with st.expander(tpl.workload, expanded=False):
-                st.caption(t["exec_numactl"])
-                st.code(tpl.numactl_cmd, language="bash")
-                st.caption(t["exec_taskset"])
-                st.code(tpl.taskset_cmd, language="bash")
-                st.caption(t["exec_docker"])
-                st.code(tpl.docker_cmd, language="bash")
-
     st.info(
         t["expected"].format(
             before=recommendation.expected_util_before,
@@ -435,25 +520,67 @@ if st.button(t["analyze"], type="primary", disabled=scenario is None):
     st.caption(t["source_caption"].format(source=rec_source))
     st.write(rec_text)
 
-    report_bytes = build_pdf_report(
-        scenario_name=selected_name,
-        score=score,
-        findings=findings,
-        analysis_text=analysis_text,
-        recommendation=recommendation,
-        recommendation_text=rec_text,
-        labels=t["report_labels"],
-        expected_line=t["expected"].format(
-            before=recommendation.expected_util_before,
-            after=recommendation.expected_util_after,
-            train=recommendation.expected_training_gain_pct,
-            lat=recommendation.expected_latency_drop_pct,
+    exec_cfg = ExecutionConfig(
+        environment="docker" if exec_env_ui == "Docker" else "bare_metal",
+        entry_command=exec_entry.strip() or "python train.py",
+        workdir=exec_workdir.strip(),
+        image_name=exec_image.strip() if exec_env_ui == "Docker" else "your-image:latest",
+        container_prefix=exec_prefix.strip() or "infralens-job",
+        extra_args=exec_args.strip(),
+        env_vars=parsed_env_vars,
+        cpu_set_mode="manual" if exec_cpumode_ui == "Manual" else "auto",
+        manual_cpu_set=exec_cpumanual.strip(),
+        gpu_visibility_style=(
+            "cuda_visible_devices"
+            if exec_gpustyle_ui == "CUDA_VISIBLE_DEVICES"
+            else "docker_gpus_device"
         ),
     )
+    cmd_templates = build_execution_templates(
+        analyzed_scenario,
+        analyzed_workloads,
+        recommendation_raw,
+        exec_cfg=exec_cfg,
+    )
+    if cmd_templates:
+        st.subheader(t["exec_title"])
+        st.caption(t["exec_desc"])
+        show_host_ref = False
+        if exec_cfg.environment == "docker":
+            show_host_ref = st.toggle("Also show host commands", value=False, key="show_host_ref_toggle")
+        for tpl in cmd_templates:
+            with st.expander(tpl.workload, expanded=False):
+                if exec_cfg.environment == "docker":
+                    st.caption(t["exec_docker"])
+                    st.code(tpl.docker_cmd, language="bash")
+                    if show_host_ref:
+                        st.caption(t["exec_numactl"])
+                        st.code(tpl.numactl_cmd, language="bash")
+                        st.caption(t["exec_taskset"])
+                        st.code(tpl.taskset_cmd, language="bash")
+                else:
+                    st.caption(t["exec_numactl"])
+                    st.code(tpl.numactl_cmd, language="bash")
+                    st.caption(t["exec_taskset"])
+                    st.code(tpl.taskset_cmd, language="bash")
 
     st.download_button(
         label=t["pdf"],
-        data=report_bytes,
+        data=build_pdf_report(
+            scenario_name=analyzed_scenario_name,
+            score=score,
+            findings=findings,
+            analysis_text=analysis_text,
+            recommendation=recommendation,
+            recommendation_text=rec_text,
+            labels=t["report_labels"],
+            expected_line=t["expected"].format(
+                before=recommendation.expected_util_before,
+                after=recommendation.expected_util_after,
+                train=recommendation.expected_training_gain_pct,
+                lat=recommendation.expected_latency_drop_pct,
+            ),
+        ),
         file_name="infralens_report.pdf",
         mime="application/pdf",
     )
