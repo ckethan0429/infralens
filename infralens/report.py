@@ -20,12 +20,15 @@ class PDFReport(FPDF):
         self.ln(2)
 
 
+def _safe_pdf_text(pdf: FPDF, text: str) -> str:
+    if getattr(pdf, "_unicode_enabled", False):
+        return text
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
 def _write_multiline(pdf: FPDF, text: str, line_height: int = 6) -> None:
     # Keep writes anchored to left margin so effective width never becomes zero.
-    if getattr(pdf, "_unicode_enabled", False):
-        safe_text = text
-    else:
-        safe_text = text.encode("latin-1", "replace").decode("latin-1")
+    safe_text = _safe_pdf_text(pdf, text)
     pdf.set_x(pdf.l_margin)
     pdf.multi_cell(pdf.epw, line_height, safe_text)
 
@@ -118,12 +121,12 @@ def build_pdf_report(
     pdf.add_page()
 
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 12)
-    pdf.cell(0, 8, f"{lbl['scenario']}: {scenario_name}", ln=True)
-    pdf.cell(0, 8, f"{lbl['efficiency']}: {score.score}/100 ({score.grade})", ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, f"{lbl['scenario']}: {scenario_name}"), ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, f"{lbl['efficiency']}: {score.score}/100 ({score.grade})"), ln=True)
     pdf.ln(3)
 
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
-    pdf.cell(0, 8, lbl["component_scores"], ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, lbl["component_scores"]), ln=True)
     pdf.set_font(font_family, "", 10)
     _write_multiline(
         pdf,
@@ -136,20 +139,20 @@ def build_pdf_report(
     pdf.ln(2)
 
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
-    pdf.cell(0, 8, lbl["findings"], ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, lbl["findings"]), ln=True)
     pdf.set_font(font_family, "", 10)
     for finding in findings:
         _write_multiline(pdf, f"- [{finding.category}] {finding.message}")
 
     pdf.ln(2)
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
-    pdf.cell(0, 8, lbl["analysis"], ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, lbl["analysis"]), ln=True)
     pdf.set_font(font_family, "", 10)
     _write_multiline(pdf, _markdown_to_plain_text(analysis_text))
 
     pdf.ln(2)
     pdf.set_font(font_family, "B" if font_family == "Helvetica" else "", 11)
-    pdf.cell(0, 8, lbl["placement"], ln=True)
+    pdf.cell(0, 8, _safe_pdf_text(pdf, lbl["placement"]), ln=True)
     pdf.set_font(font_family, "", 10)
     for idx, item in enumerate(recommendation.items, 1):
         _write_multiline(pdf, f"{idx}. {item.workload}: {item.action}")
